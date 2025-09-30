@@ -1,0 +1,1949 @@
+import EasyHash
+import sys
+import os
+import hashlib
+import json
+import hmac
+import logging
+import requests
+from pathlib import Path
+from typing import Dict, Any, Optional
+
+# qaction'ı pyside6.QtGui'den import etmeliyiz yoksa bozulur açılmaz o yüzden değiştirme
+from PySide6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QPushButton, QLabel, QComboBox, QProgressBar, QTextEdit,
+    QFileDialog, QMenuBar, QMessageBox, QDialog, QSlider, QCheckBox,
+    QLineEdit, QGridLayout, QGroupBox 
+)
+from PySide6.QtCore import Qt, QThread, Signal, QRect
+from PySide6.QtGui import QAction, QIntValidator # QAction ve QIntValidator'ın doğru yeri burasıdır değiştirme değiştirirsen bozulur uygulama açılmaz
+
+
+# monitor ayarlama (yapay zekaya yaptirdim burayi yoksa cok uzun surerdi ugrasmak istemedim pek yorgunum zaten),
+
+import tkinter as tk
+
+# Ana pencereyi oluşturun
+root = tk.Tk()
+
+# 1. Monitör çözünürlüğünü alın
+# .winfo_screenwidth() ve .winfo_screenheight() fonksiyonları kullanılır
+screen_width = root.winfo_screenwidth()
+screen_height = root.winfo_screenheight()
+
+# 2. Pencere için boyut oranlarını belirleyin
+# Örneğin, pencereyi monitörün %80'i genişliğinde ve %70'i yüksekliğinde yapalım.
+# Bu oranları uygulamanızın içeriğine göre ayarlayabilirsiniz.
+window_width = int(screen_width * 0.80)
+window_height = int(screen_height * 0.70)
+
+# 3. Pencerenin ekranda ortalanması için konumunu hesaplayın
+# x = (Monitör Genişliği / 2) - (Pencere Genişliği / 2)
+# y = (Monitör Yüksekliği / 2) - (Pencere Yüksekliği / 2)
+position_x = int((screen_width / 2) - (window_width / 2))
+position_y = int((screen_height / 2) - (window_height / 2))
+
+# 4. Pencerenin boyutunu ve konumunu ayarlayın
+# Format: "genislikxyukseklik+konumX+konumY"
+root.geometry(f"{window_width}x{window_height}+{position_x}+{position_y}")
+
+# Pencerenizin minimum boyutlarını da ayarlamak iyi bir uygulamadır
+# Kullanıcı pencereyi küçültse bile uygulama kullanışlı kalır
+root.minsize(int(screen_width * 0.40), int(screen_height * 0.40)) 
+
+root.state('zoomed') 
+
+
+# ----------------------------
+# dil tanımları ve çeviri fonksiyonu
+# ----------------------------
+
+# global çeviri fonksiyonu (varsayılan olarak kendisine gelen stringi döndürür)
+_ = lambda s: s
+
+def set_language(lang_key: str):
+    """
+    Global çeviri fonksiyonunu seçilen dile göre ayarlar.
+    """
+    global _
+    if lang_key in LANGUAGES:
+        translations = LANGUAGES[lang_key]["translations"]
+        _ = lambda s: translations.get(s, s)
+    else:
+        # varsayılan dil ingilizce
+        _ = lambda s: LANGUAGES["English"]["translations"].get(s, s)
+
+LANGUAGES = {
+    "English": {
+        "name": "English",
+        "key": "English",
+        "translations": {
+            "Hash Calculation Application": "Hash Calculation Application",
+            "Options": "Options",
+            "Settings": "Settings",
+            "Help": "Help",
+            "Check for Updates": "Check for Updates",
+            "About EasyHash": "About EasyHash",
+            "EasyHash Version": "EasyHash Version",
+            "File Selection": "File Selection",
+            "Select File": "Select File",
+            "No file selected yet": "No file selected yet",
+            "Select Hash Algorithm and Calculate": "Select Hash Algorithm and Calculate",
+            "Ready": "Ready",
+            "Hash Calculate": "Hash Calculate",
+            "Cancel": "Cancel",
+            "Result": "Result",
+            "Calculation result will appear here...": "Calculation result will appear here...",
+            "Hash Comparison Mode": "Hash Comparison Mode",
+            "Compare File to Select": "Compare File to Select",
+            "Enter two hash values.": "Enter two hash values.",
+            "Manual Hash:": "Manual Hash:",
+            "Paste here...": "Paste here...",
+            "Calculated Hash:": "Calculated Hash:",
+            "The calculated hash will appear here.": "The calculated hash will appear here.",
+            "Hash values match.": "Hash values match.",
+            "Hash values do not match.": "Hash values do not match.",
+            "Error while comparing.": "Error while comparing.",
+            "Error": "Error",
+            "Operation Error": "Operation Error",
+            "Please select a valid file!": "Please select a valid file!",
+            "Hash value is being calculated...": "Hash value is being calculated...",
+            "Canceled.": "Canceled.",
+            "Calculation completed.": "Calculation completed.",
+            "File:": "File:",
+            "Unexpected error occurred: ": "Unexpected error occurred: ",
+            "File not found or inaccessible.": "File not found or inaccessible.",
+            "File could not be read. Driver might be ejected or file corrupt.": "File could not be read. Driver might be ejected or file corrupt.",
+            "Symbolic links are not supported for security reasons.": "Symbolic links are not supported for security reasons.",
+            "The selected file has unsuitable permissions or location.": "The selected file has unsuitable permissions or location.",
+            "Warning! External Drive Detected": "Warning! External Drive Detected",
+            "This file is on an external storage device. Ejecting the drive during the process may cause data corruption. Do you approve?": "This file is on an external storage device. Ejecting the drive during the process may cause data corruption. Do you approve?",
+            "Yes": "Yes",
+            "No": "No",
+            "Please drag only one file.": "Please drag only one file.",
+            "Please drag a file, not a folder.": "Please drag a file, not a folder.",
+            "Invalid hash algorithm selected.": "Invalid hash algorithm selected.",
+            "About EasyHash": "About EasyHash",
+            "----------- General Information -----------": "----------- General Information -----------",
+            "EasyHash is a completely open source Hash measurement application.": "EasyHash is a completely open source Hash measurement application.",
+            "EasyHash source code is available on our official GitHub page.": "EasyHash source code is available on our official GitHub page.",
+            "We do not have any donations or PayPal page.": "We do not have any donations or PayPal page.",
+            "----------- Security -----------": "----------- Security -----------",
+            "EasyHash DOES NOT collect any information or data, but an \"app.log\" file is located in the user's local AppData folder, which is used to record application crashes and other simple things and is NOT SHARED or COLLECTED with anyone. If you do not want the \"app.log\" file to collect crash data, you can turn it off in the application settings.": "EasyHash DOES NOT collect any information or data, but an \"app.log\" file is located in the user's local AppData folder, which is used to record application crashes and other simple things and is NOT SHARED or COLLECTED with anyone. If you do not want the \"app.log\" file to collect crash data, you can turn it off in the application settings.",
+            "Application Version: ": "Application Version: ",
+            "New Update Available": "New Update Available",
+            "A new version of EasyHash is available: v": "A new version of EasyHash is available: v",
+            "Do you want to download and install now?": "Do you want to download and install now?",
+            "Yes, Update": "Yes, Update",
+            "No, Not Now": "No, Not Now",
+            "Downloading Update": "Downloading Update",
+            "Starting...": "Starting...",
+            "Update Error": "Update Error",
+            "Update operation failed: ": "Update operation failed: ",
+            "Downloading...": "Downloading...",
+            "Download complete. Installation starting...": "Download complete. Installation starting...",
+            "Application restarting...": "Application restarting...",
+            "Update Successful": "Update Successful",
+            " installation started. The application will restart automatically.": " installation started. The application will restart automatically.",
+            "Update Check": "Update Check",
+            "No new version is available for EasyHash.": "No new version is available for EasyHash.",
+            "Invalid SHAKE length. Default value will be used.": "Invalid SHAKE length. Default value will be used.",
+            "General Settings": "General Settings",
+            "Application Appearance:": "Application Appearance:",
+            "Select the dark or light theme of the application.": "Select the dark or light theme of the application.",
+            "Dark": "Dark",
+            "Light": "Light",
+            "Language:": "Language:",
+            "Hash Comparison Mode": "Hash Comparison Mode",
+            "Enable this mode to compare the calculated hash value with a manually entered hash.": "Enable this mode to compare the calculated hash value with a manually entered hash.",
+            "Performance and Security": "Performance and Security",
+            "File Read Chunk Size:": "File Read Chunk Size:",
+            "Determines how large chunks of files will be read. Larger chunks can increase speed but also increase memory usage.": "Determines how large chunks of files will be read. Larger chunks can increase speed but also increase memory usage.",
+            "SHAKE Output Length (Bytes):": "SHAKE Output Length (Bytes):",
+            "Determines the output size of SHAKE algorithms. It is recommended to use at least 32 for 128-bit security and 64 for 256-bit.": "It is recommended to use at least 32 for 128-bit security and 64 for 256-bit.",
+            "Enable Unsafe Algorithms (MD5, SHA1)": "Enable Unsafe Algorithms (MD5, SHA1)",
+            "These algorithms are considered weak and should not be used in security applications. Use them only to verify legacy hashes.": "These algorithms are considered weak and should not be used in security applications. Use them only to verify legacy hashes.",
+            "Ignore Application Policies": "Ignore Application Policies",
+            "Disables security policies such as access to files on external drives and file size limits.": "Disables security policies such as access to files on external drives and file size limits.",
+            "Disable Error Logging (app.log)": "Disable Error Logging (app.log)",
+            "Stops logging application crashes and error messages to the app.log file.": "Stops logging application crashes and error messages to the app.log file.",
+            "Disable Automatic Updates": "Disable Automatic Updates",
+            "Disables automatic update checks on application startup.": "Disables automatic update checks on application startup.",
+            "Save and Close": "Save and Close",
+            "Settings": "Settings",
+            "The file size exceeds the limit.": "The file size exceeds the limit.",
+            "Hash comparison mode.": "Hash comparison mode.",
+            "An error occurred while checking the external drive.": "An error occurred while checking the external drive.",
+            "File read error.": "File read error.",
+        }
+    },
+    "Türkçe": {
+        "name": "Türkçe",
+        "key": "Türkçe",
+        "translations": {
+            "EasyHash": "EasyHash",
+            "Options": "Seçenekler",
+            "Settings": "Ayarlar",
+            "Help": "Yardım",
+            "Check for Updates": "Güncellemeleri Kontrol Et",
+            "About EasyHash": "EasyHash Hakkında",
+            "EasyHash Version": "EasyHash Sürümü",
+            "File Selection": "Dosya Seçimi",
+            "Select File": "Dosya Seç",
+            "No file selected yet": "Henüz dosya seçilmedi",
+            "Select Hash Algorithm and Calculate": "Hash Algoritmasını Seçin ve Hesaplayın",
+            "Ready": "Hazır",
+            "Hash Calculate": "Hash Hesapla",
+            "Cancel": "İptal",
+            "Result": "Sonuç",
+            "Calculation result will appear here...": "Hesaplama sonucu burada görünecek...",
+            "Hash Comparison Mode": "Hash Karşılaştırma Modu",
+            "Compare File to Select": "Karşılaştırılacak Dosyayı Seç",
+            "Enter two hash values.": "İki hash değerini girin.",
+            "Expected Hash Value:": "Beklenen Hash Değeri:",
+            "Paste here...": "Buraya yapıştırın...",
+            "Calculated Hash:": "Hesaplanan Hash:",
+            "The calculated hash will appear here.": "Hesaplanan hash burada görünecek.",
+            "Hash values match.": "Hash değerleri uyuşuyor.",
+            "Hash values do not match.": "Hash değerleri uyuşmuyor.",
+            "Error while comparing.": "Karşılaştırma sırasında hata.",
+            "Error": "Hata",
+            "Operation Error": "İşlem Hatası",
+            "Please select a valid file!": "Geçerli bir dosya seçiniz!",
+            "Hash value is being calculated...": "Hash değeri hesaplanıyor...",
+            "Canceled.": "İptal edildi.",
+            "Calculation completed.": "Hesaplama tamamlandı.",
+            "File:": "Dosya:",
+            "Unexpected error occurred: ": "Beklenmedik bir hata oluştu: ",
+            "File not found or inaccessible.": "Dosya bulunamadı veya erişilemiyor.",
+            "File could not be read. Driver might be ejected or file corrupt.": "Dosya okunamadı. Sürücü çıkarılmış veya dosya bozulmuş olabilir.",
+            "Symbolic links are not supported for security reasons.": "Sembolik linkler güvenlik nedeniyle desteklenmemektedir.",
+            "The selected file has unsuitable permissions or location.": "Seçilen dosya izinleri veya konumu uygun değil.",
+            "Warning! External Drive Detected": "Dikkat! Harici Sürücü Algılandı",
+            "This file is on an external storage device. Ejecting the drive during the process may cause data corruption. Do you approve?": "Bu dosya harici bir depolama biriminde bulunmaktadır. İşleminiz sırasında sürücüyü çıkarmak veri bozulmasına neden olabilir. Onaylıyor musunuz?",
+            "Yes": "Evet",
+            "No": "Hayır",
+            "Please drag only one file.": "Lütfen yalnızca tek bir dosya sürükleyin.",
+            "Please drag a file, not a folder.": "Lütfen bir dosya sürükleyin, klasör değil.",
+            "Invalid hash algorithm selected.": "Geçersiz hash algoritması seçildi.",
+            "About EasyHash": "EasyHash Hakkında",
+            "----------- General Information -----------": "----------- Genel Bilgiler -----------",
+            "EasyHash is a completely open source Hash measurement application.": "EasyHash tamamen açık kaynak bir Hash ölçme uygulamasıdır.",
+            "EasyHash source code is available on our official GitHub page.": "EasyHash kaynak kodu resmi GitHub sayfamızda bulunmaktadır.",
+            "We do not have any donations or PayPal page.": "Herhangi bağış ve PayPal sayfamız bulunmamaktadır.",
+            "----------- Security -----------": "----------- Güvenlik -----------",
+            "EasyHash DOES NOT collect any information or data, but an \"app.log\" file is located in the user's local AppData folder, which is used to record application crashes and other simple things and is NOT SHARED or COLLECTED with anyone. If you do not want the \"app.log\" file to collect crash data, you can turn it off in the application settings.": "EasyHash hiç bir bilginizi, verinizi TOPLAMAZ ancak kullanıcının yerel AppData klasöründe \"app.log\" dosyası bulunmaktadır bu dosya uygulama çökmelerini ve diğer basit şeyleri kaydetmek için kullanılır ve kimseyle PAYLAŞILMAZ veya TOPLANMAZ. Eğer \"app.log\" dosyasının çökme verilerini toplamasını istemiyorsanız uygulama ayarlarından kapatabilirsiniz.",
+            "Application Version: ": "Uygulama Sürümü: ",
+            "New Update Available": "Yeni Güncelleme Mevcut",
+            "A new version of EasyHash is available: v": "EasyHash'in yeni bir sürümü mevcut: v",
+            "Do you want to download and install now?": "Şimdi indirmek ve kurmak ister misiniz?",
+            "Yes, Update": "Evet, Güncelle",
+            "No, Not Now": "Şimdilik Hayır",
+            "Downloading Update": "Güncelleme İndiriliyor",
+            "Starting...": "Başlatılıyor...",
+            "Update Error": "Güncelleme Hatası",
+            "Update operation failed: ": "Güncelleme işlemi başarısız oldu: ",
+            "Downloading...": "İndiriliyor...",
+            "Download complete. Installation starting...": "İndirme tamamlandı. Kurulum başlatılıyor...",
+            "Application restarting...": "Uygulama yeniden başlatılıyor...",
+            "Update Successful": "Güncelleme Başarılı",
+            " installation started. The application will restart automatically.": " kurulumu başlatıldı. Uygulama otomatik olarak yeniden başlatılacaktır.",
+            "Update Check": "Güncelleme Kontrolü",
+            "No new version is available for EasyHash.": "EasyHash için yeni bir sürüm bulunmamaktadır.",
+            "Invalid SHAKE length. Default value will be used.": "Geçersiz SHAKE uzunluğu. Varsayılan değer kullanılacak.",
+            "General Settings": "Genel Ayarlar",
+            "Application Appearance:": "Uygulama Görünümü:",
+            "Select the dark or light theme of the application.": "Uygulamanın açık veya koyu temasını seçin.",
+            "Dark": "Koyu",
+            "Light": "Açık",
+            "Language:": "Dil:",
+            "Hash Comparison Mode": "Hash Karşılaştırma Modu",
+            "Enable this mode to compare the calculated hash value with a manually entered hash.": "Hesaplanan hash değerini manuel girilen bir hash ile karşılaştırmak için bu modu etkinleştirin.",
+            "Performance and Security": "Performans ve Güvenlik",
+            "File Read Chunk Size:": "Dosya Okuma Parça Boyutu:",
+            "Determines how large chunks of files will be read. Larger chunks can increase speed but also increase memory usage.": "Dosyaların ne kadar büyük parçalar halinde okunacağını belirler. Daha büyük parçalar hızı artırabilir, ancak bellek kullanımını da artırır.",
+            "SHAKE Output Length (Bytes):": "SHAKE Çıktı Uzunluğu (Bayt):",
+            "Determines the output size of SHAKE algorithms. It is recommended to use at least 32 for 128-bit security and 64 for 256-bit.": "SHAKE algoritmalarının çıktı boyutunu belirler. 128 bit güvenlik için en az 32, 256 bit için 64 kullanılması önerilir.",
+            "Enable Unsafe Algorithms (MD5, SHA1)": "Onaysız Algoritmaları Etkinleştir (MD5, SHA1)",
+            "These algorithms are considered weak and should not be used in security applications. Use them only to verify legacy hashes.": "Bu algoritmalar zayıf kabul edilir ve güvenlik uygulamalarında kullanılmamalıdır. Yalnızca eski hash'leri doğrulamak için kullanın.",
+            "Ignore Application Policies": "Uygulama Politikalarını Yok Say",
+            "Disables security policies such as access to files on external drives and file size limits.": "Harici sürücülerdeki dosyalara erişim ve dosya boyutu limitlerini devre dışı bırakır.",
+            "Disable Error Logging (app.log)": "Hata Kaydını Devre Dışı Bırak (app.log)",
+            "Stops logging application crashes and error messages to the app.log file.": "Uygulama çökmelerini ve hata mesajlarını app.log dosyasına kaydetmeyi durdurur.",
+            "Disable Automatic Updates": "Otomatik Güncellemeleri Devre Dışı Bırak",
+            "Disables automatic update checks on application startup.": "Uygulama başlangıcında otomatik güncelleme denetimlerini devre dışı bırakır.",
+            "Save and Close": "Kaydet ve Kapat",
+            "Settings": "Ayarlar",
+            "The file size exceeds the limit.": "Dosya boyutu limitini aşıyor.",
+            "Hash comparison mode.": "Hash karşılaştırma modu.",
+            "An error occurred while checking the external drive.": "Harici sürücü kontrolünde hata oluştu.",
+            "File read error.": "Dosya okuma hatası.",
+        }
+    }
+}
+
+# ----------------------------
+# uygulama bilgileri
+# ----------------------------
+APP_VERSION = "1.0.1"
+# sakın değiştirme başka insanların reposundaki dosyaları yükler
+# eğer değişirsen virüs girme ihtimali olur bilinçsiz şekilde sakın değişme
+GITHUB_REPO_API = "https://api.github.com/repos/tssfy/EasyHash/releases/latest" 
+
+# ----------------------------
+# uygulama temaları istersen değieşbilirsin
+# ----------------------------
+MODERN_DARK_THEME_QSS = """
+QWidget {
+    background-color: #1a1a1a;
+    color: #f0f0f0;
+    font-family: "Segoe UI", "Helvetica", "Arial";
+    font-size: 14px;
+}
+QMenuBar {
+    background-color: #1a1a1a;
+    color: #f0f0f0;
+    border-bottom: 1px solid #3c3c3c;
+}
+QMenuBar::item:selected {
+    background-color: #3e3e3e;
+}
+QMenu {
+    background-color: #2e2e2e;
+    color: #f0f0f0;
+    border: 1px solid #4e4e4e;
+    border-radius: 5px;
+}
+QMenu::item:selected {
+    background-color: #007acc;
+}
+QPushButton {
+    background-color: #007acc;
+    color: #f0f0f0;
+    border: none;
+    border-radius: 8px;
+    padding: 12px 20px;
+    font-weight: bold;
+}
+QPushButton:hover {
+    background-color: #0063a8;
+}
+QPushButton:disabled {
+    background-color: #4e4e4e;
+    color: #8c8c8c;
+}
+QLabel {
+    color: #f0f0f0;
+}
+QCheckBox::indicator {
+    width: 20px;
+    height: 20px;
+    border-radius: 5px;
+}
+QCheckBox::indicator:unchecked {
+    background-color: #2e2e2e;
+    border: 1px solid #4e4e4e;
+}
+QCheckBox::indicator:checked {
+    background-color: #007acc;
+    border: 1px solid #007acc;
+}
+QCheckBox::indicator:checked:hover {
+    background-color: #0063a8;
+}
+QComboBox {
+    background-color: #2e2e2e;
+    color: #f0f0f0;
+    border: 1px solid #4e4e4e;
+    border-radius: 8px;
+    padding: 8px 10px;
+}
+QComboBox::drop-down {
+    border: none;
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 25px;
+}
+QComboBox::down-arrow {
+    image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSIjZjBmMGYwIj48cGF0aCBkPSJNNyAxMGwxIDggMTAtOGwtMTAtOCAxMCA4eiIvPjwvc3ZnPg==);
+    width: 12px;
+    height: 12px;
+}
+QTextEdit {
+    background-color: #1a1a1a;
+    color: #ffffff;
+    border: 1px solid #4e4e4e;
+    border-radius: 8px;
+    padding: 10px;
+}
+QProgressBar {
+    border: 1px solid #4e4e4e;
+    border-radius: 8px;
+    text-align: center;
+    background-color: #2e2e2e;
+    color: #f0f0f0;
+}
+QProgressBar::chunk {
+    background-color: #007acc;
+    border-radius: 8px;
+}
+QSlider::groove:horizontal {
+    height: 8px;
+    background: #4e4e4e;
+    border-radius: 4px;
+}
+QSlider::handle:horizontal {
+    background: #007acc;
+    border: 1px solid #007acc;
+    width: 18px;
+    margin: -5px 0;
+    border-radius: 9px;
+}
+QToolTip {
+    background-color: #3e3e3e;
+    color: #f0f0f0;
+    border: 1px solid #555555;
+    border-radius: 5px;
+    padding: 5px;
+}
+QLineEdit {
+    background-color: #2e2e2e;
+    color: #f0f0f0;
+    border: 1px solid #4e4e4e;
+    border-radius: 8px;
+    padding: 8px 10px;
+}
+QGroupBox {
+    border: 1px solid #4e4e4e;
+    border-radius: 8px;
+    margin-top: 20px;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    padding: 0 3px;
+    color: #007acc;
+    font-size: 16px;
+    font-weight: bold;
+}
+"""
+
+MODERN_LIGHT_THEME_QSS = """
+QWidget {
+    background-color: #f0f0f0;
+    color: #1a1a1a;
+    font-family: "Segoe UI", "Helvetica", "Arial";
+    font-size: 14px;
+}
+QMenuBar {
+    background-color: #f0f0f0;
+    color: #1a1a1a;
+    border-bottom: 1px solid #c9c9c9;
+}
+QMenuBar::item:selected {
+    background-color: #dcdcdc;
+}
+QMenu {
+    background-color: #ffffff;
+    color: #1a1a1a;
+    border: 1px solid #c9c9c9;
+    border-radius: 5px;
+}
+QMenu::item:selected {
+    background-color: #007acc;
+    color: #ffffff;
+}
+QPushButton {
+    background-color: #007acc;
+    color: #f0f0f0;
+    border: none;
+    border-radius: 8px;
+    padding: 12px 20px;
+    font-weight: bold;
+}
+QPushButton:hover {
+    background-color: #0063a8;
+}
+QPushButton:disabled {
+    background-color: #a0a0a0;
+    color: #606060;
+}
+QLabel {
+    color: #1a1a1a;
+}
+QCheckBox::indicator {
+    width: 20px;
+    height: 20px;
+    border-radius: 5px;
+}
+QCheckBox::indicator:unchecked {
+    background-color: #ffffff;
+    border: 1px solid #c9c9c9;
+}
+QCheckBox::indicator:checked {
+    background-color: #007acc;
+    border: 1px solid #007acc;
+}
+QCheckBox::indicator:checked:hover {
+    background-color: #0063a8;
+}
+QComboBox {
+    background-color: #ffffff;
+    color: #1a1a1a;
+    border: 1px solid #c9c9c9;
+    border-radius: 8px;
+    padding: 8px 10px;
+}
+QComboBox::drop-down {
+    border: none;
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 25px;
+}
+QComboBox::down-arrow {
+    image: url(data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSIjMWExYTFhIj48cGF0aCBkPSJNNyAxMGwxIDggMTAtOGwtMTAtOCAxMCA4eiIvPjwvc3ZnPg==);
+    width: 12px;
+    height: 12px;
+}
+QTextEdit {
+    background-color: #ffffff;
+    color: #1a1a1a;
+    border: 1px solid #c9c9c9;
+    border-radius: 8px;
+    padding: 10px;
+}
+QProgressBar {
+    border: 1px solid #c9c9c9;
+    border-radius: 8px;
+    text-align: center;
+    background-color: #e0e0e0;
+    color: #1a1a1a;
+}
+QProgressBar::chunk {
+    background-color: #007acc;
+    border-radius: 8px;
+}
+QSlider::groove:horizontal {
+    height: 8px;
+    background: #c9c9c9;
+    border-radius: 4px;
+}
+QSlider::handle:horizontal {
+    background: #007acc;
+    border: 1px solid #007acc;
+    width: 18px;
+    margin: -5px 0;
+    border-radius: 9px;
+}
+QToolTip {
+    background-color: #ffffff;
+    color: #1a1a1a;
+    border: 1px solid #c9c9c9;
+    border-radius: 5px;
+    padding: 5px;
+}
+QLineEdit {
+    background-color: #ffffff;
+    color: #1a1a1a;
+    border: 1px solid #c9c9c9;
+    border-radius: 8px;
+    padding: 8px 10px;
+}
+QGroupBox {
+    border: 1px solid #c9c9c9;
+    border-radius: 8px;
+    margin-top: 20px;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    padding: 0 3px;
+    color: #007acc;
+    font-size: 16px;
+    font-weight: bold;
+}
+"""
+
+# ----------------------------
+# logging işlemleri (uygulama klasöründe app.log)
+# ----------------------------
+def get_default_config_dir() -> Path:
+    appdata = os.getenv("APPDATA")
+    if appdata:
+        return Path(appdata) / "EasyHash"
+    else:
+        # Linux / mac fallback
+        return Path.home() / ".config" / "EasyHash"
+
+CONFIG_DIR = get_default_config_dir()
+LOG_PATH = CONFIG_DIR / "app.log"
+LOG_ENABLED = True
+
+def setup_logging(log_enabled: bool):
+    global LOG_ENABLED
+    LOG_ENABLED = log_enabled
+    if log_enabled:
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        logging.basicConfig(
+            filename=str(LOG_PATH),
+            level=logging.INFO,
+            format="%(asctime)s [%(levelname)s] %(message)s"
+        )
+        logging.info("Uygulama başlatıldı.")
+    else:
+        logging.disable(logging.CRITICAL)
+
+# ----------------------------
+# güvenli hash map (whitelist)
+# ----------------------------
+ALLOWED_HASHES = {
+    "sha224": hashlib.sha224,
+    "sha256": hashlib.sha256,
+    "sha384": hashlib.sha384,
+    "sha512": hashlib.sha512,
+    "blake2b": hashlib.blake2b,
+    "blake2s": hashlib.blake2s,
+    "sha3_224": hashlib.sha3_224,
+    "sha3_256": hashlib.sha3_256,
+    "sha3_384": hashlib.sha3_384,
+    "sha3_512": hashlib.sha3_512,
+}
+
+UNSAFE_HASHES = {
+    "md5": hashlib.md5,
+    "sha1": hashlib.sha1
+}
+
+XOF_HASHES = {
+    "shake_128": hashlib.shake_128,
+    "shake_256": hashlib.shake_256,
+}
+
+MIN_CHUNK = 64 * 1024
+MAX_CHUNK = 20 * 1024 * 1024  # 20 MB
+MAX_FILE_BYTES = 5 * 1024 * 1024 * 1024  # 5 GB
+DEFAULT_SHAKE_LEN = 64
+
+
+# ----------------------------
+# ayar yükleme/kaydetme yeri
+# ----------------------------
+def load_settings_safe(path: Path) -> Dict[str, Any]:
+    defaults = {
+        "theme": "Koyu",
+        "language": "English",
+        "chunk_size": 1024 * 1024,
+        "enable_unsafe_hashes": False,
+        "ignore_policies": False,
+        "shake_length": DEFAULT_SHAKE_LEN,
+        "enable_logging": True,
+        "disable_auto_updates": False # YENİ: Varsayılan değer 'False' (güncelleme açık)
+    }
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            settings = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return defaults
+
+    # dil ayarı kontrolü
+    language = settings.get("language", defaults["language"])
+    if language not in LANGUAGES:
+        language = defaults["language"]
+
+    theme = settings.get("theme", defaults["theme"])
+    # tema adı çeviri anahtarı olduğu için sadece türkçeleştirilmiş karşılığını kontrol et
+    # burada çeviri fonksiyonu henüz ayarlanmamış olabileceği için string değerlerini kullandım
+    # eğer benim bilmediğim daha iyi bir çözüm yolu varsa modifiye edebilirsin
+    if theme not in ("Koyu", "Açık"): 
+        theme = defaults["theme"]
+
+    try:
+        chunk = int(settings.get("chunk_size", defaults["chunk_size"]))
+    except (TypeError, ValueError):
+        chunk = defaults["chunk_size"]
+
+    if chunk < MIN_CHUNK:
+        chunk = MIN_CHUNK
+    elif chunk > MAX_CHUNK:
+        chunk = MAX_CHUNK
+
+    try:
+        shake_len = int(settings.get("shake_length", defaults["shake_length"]))
+    except (TypeError, ValueError):
+        shake_len = defaults["shake_length"]
+
+    enable_unsafe = bool(settings.get("enable_unsafe_hashes", defaults["enable_unsafe_hashes"]))
+    ignore_policies = bool(settings.get("ignore_policies", defaults["ignore_policies"]))
+    enable_logging = bool(settings.get("enable_logging", defaults["enable_logging"]))
+    # YENİ AYARI OKU
+    disable_auto_updates = bool(settings.get("disable_auto_updates", defaults["disable_auto_updates"]))
+
+    return {
+        "theme": theme,
+        "language": language,
+        "chunk_size": chunk,
+        "enable_unsafe_hashes": enable_unsafe,
+        "ignore_policies": ignore_policies,
+        "shake_length": shake_len,
+        "enable_logging": enable_logging,
+        "disable_auto_updates": disable_auto_updates # yteni müthiş ayar
+    }
+
+
+def save_settings_safe(path: Path, settings: Dict[str, Any]) -> None:
+    # anotik yazilim icin dosya gerekli bunu o yapiyor
+    temp_path = path.with_suffix('.tmp')
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # sadece tanimli anahtarlari kaydediyor suan buda onemli
+        data_to_save = {
+            "theme": settings.get("theme", "Koyu"),
+            "language": settings.get("language", "English"),
+            "chunk_size": int(settings.get("chunk_size", 1024 * 1024)),
+            "enable_unsafe_hashes": bool(settings.get("enable_unsafe_hashes", False)),
+            "ignore_policies": bool(settings.get("ignore_policies", False)),
+            "shake_length": int(settings.get("shake_length", DEFAULT_SHAKE_LEN)),
+            "enable_logging": bool(settings.get("enable_logging", True)),
+            "disable_auto_updates": bool(settings.get("disable_auto_updates", False)) # YENİ: Kayda ekle
+        }
+        with open(temp_path, "w", encoding="utf-8") as f:
+            json.dump(data_to_save, f, indent=4)
+        # Güvenli değişim
+        os.replace(temp_path, path)
+        # unix izinlerini daraltiriyor onemli
+        if os.name == 'posix':
+            try:
+                os.chmod(path, 0o600)
+            except Exception as e:
+                if LOG_ENABLED: logging.exception(f"Dosya izinleri ayarlanırken hata: {e}")
+
+    except Exception:
+        logging.exception("Ayarlar kaydedilirken hata oluştu.")
+    finally:
+        # Temp dosyası kalırsa sil
+        if temp_path.exists():
+            try:
+                temp_path.unlink()
+            except OSError:
+                logging.exception(f"Geçici dosya silinirken hata: {temp_path}")
+
+
+# ----------------------------
+# dosya izinleri ve path guvenligi
+# bak burasida cok onemli bi yer en ufak hatada sikinti cikar haberin olsun
+# ----------------------------
+def is_allowed_file(path: Path, ignore_policies: bool = False) -> bool:
+    try:
+        if not path.exists():
+            if LOG_ENABLED: logging.warning(f"Dosya bulunamadı: {path.name}")
+            return False
+        # Gerçek (canonical) yolu alın
+        real_path = path.resolve()
+        # Symlink kontrolü
+        if path.is_symlink():
+            if LOG_ENABLED: logging.warning(f"Symlink reddedildi: {path.name}")
+            return False
+        # Boyut kontrolu
+        if not ignore_policies:
+            size = real_path.stat().st_size
+            if size > MAX_FILE_BYTES:
+                if LOG_ENABLED: logging.warning(f"{_('The file size exceeds the limit.')}: {path.name}")
+                return False
+        return True
+    except Exception:
+        if LOG_ENABLED: logging.exception(f"is_allowed_file kontrolünde hata: {path.name}")
+        return False
+
+
+# -----------------------------
+# worker sinifi bu sinif cok onemli her seyi bu sinif yapiyor bu worker cok buyuk adam
+# o yuzden sacma sapan guncellemeler yapmayin buraya
+# guvenlik acigi olusturabilirsiniz
+# -----------------------------
+class Worker(QThread):
+    progress_updated = Signal(int)
+    calculation_finished = Signal(str, str, str)
+    error_occurred = Signal(str)
+
+    def __init__(self, file_path: Path, hash_type: str, chunk_size: int, shake_length: int, parent=None):
+        super().__init__(parent)
+        self.file_path = Path(file_path)
+        self.hash_type = hash_type
+        try:
+            self.chunk_size = int(chunk_size)
+        except (TypeError, ValueError):
+            self.chunk_size = 1024 * 1024
+        try:
+            self.shake_length = int(shake_length)
+        except (TypeError, ValueError):
+            self.shake_length = DEFAULT_SHAKE_LEN
+
+        all_hashes = {**ALLOWED_HASHES, **UNSAFE_HASHES, **XOF_HASHES}
+        if self.hash_type not in all_hashes:
+            raise ValueError("Invalid hash algorithm selected.")
+
+    def safe_open(self, path: Path):
+        """
+        Try to open file without following symlinks when the platform supports it.
+        Falls back to normal open if flags not available.
+        """
+        try:
+            flags = os.O_RDONLY
+            # prefer O_NOFOLLOW if available (UNIX)
+            if hasattr(os, "O_NOFOLLOW"):
+                flags |= os.O_NOFOLLOW
+            # On windows try to use binary flag if present
+            if hasattr(os, "O_BINARY"):
+                flags |= os.O_BINARY
+            fd = os.open(str(path), flags)
+            return os.fdopen(fd, "rb")
+        except AttributeError:
+            # platform doesnt expose O_NOFOLLOW etc -> fallback
+            return open(path, "rb")
+        except OSError as e:
+            # re-raise to let outer try/except handle FileNotFoundError/IOError etc
+            raise
+
+    def run(self):
+        try:
+            # extra symlink check early
+            if self.file_path.is_symlink():
+                self.error_occurred.emit(_("Symbolic links are not supported for security reasons."))
+                return
+
+            all_hashes = {**ALLOWED_HASHES, **UNSAFE_HASHES, **XOF_HASHES}
+            # instantiate hash
+            hash_constructor = all_hashes.get(self.hash_type)
+            if hash_constructor is None:
+                self.error_occurred.emit(_("Invalid hash algorithm selected."))
+                return
+
+            # for xof (shake) ensure shake_length sane
+            if self.hash_type in XOF_HASHES:
+                try:
+                    if self.shake_length <= 0:
+                        self.shake_length = DEFAULT_SHAKE_LEN
+                except Exception:
+                    self.shake_length = DEFAULT_SHAKE_LEN
+                hash_func = hash_constructor()
+            else:
+                hash_func = hash_constructor()
+
+            # use safe_open to reduce TOCTOU window where possible (dont change - sakın değişme sikilir uygulama)
+            try:
+                f = self.safe_open(self.file_path)
+            except FileNotFoundError:
+                self.error_occurred.emit(_("File not found or inaccessible."))
+                return
+            except OSError as e:
+                if LOG_ENABLED: logging.exception(f"Dosya açılırken hata: {e}")
+                self.error_occurred.emit(_("File not found or inaccessible."))
+                return
+
+            file_size = self.file_path.stat().st_size if self.file_path.exists() else 0
+            read_bytes = 0
+
+            with f:
+                while not self.isInterruptionRequested():
+                    chunk = f.read(self.chunk_size)
+                    if not chunk:
+                        break
+                    hash_func.update(chunk)
+                    read_bytes += len(chunk)
+                    if file_size > 0:
+                        progress = int((read_bytes / file_size) * 100)
+                    else:
+                        progress = 100
+                    progress = max(0, min(100, progress))
+                    self.progress_updated.emit(progress)
+
+            if self.isInterruptionRequested():
+                if LOG_ENABLED: logging.info(f"Hash hesaplama iptal edildi: {self.file_path.name}")
+                return
+
+            if self.hash_type.startswith("shake"):
+                # shake algorithms need explicit output length
+                result = hash_func.hexdigest(self.shake_length)
+            else:
+                result = hash_func.hexdigest()
+
+            self.calculation_finished.emit(self.hash_type, result, str(self.file_path))
+
+        except FileNotFoundError:
+            self.error_occurred.emit(_("File not found or inaccessible."))
+        except IOError:
+            self.error_occurred.emit(_("File could not be read. Driver might be ejected or file corrupt."))
+        except Exception as e:
+            if LOG_ENABLED: logging.exception(f"Worker beklenmedik bir hata ile durdu: {e}")
+            self.error_occurred.emit(f"{_('Unexpected error occurred: ')}{e}")
+
+
+# ----------------------------
+# güncelleme diyologları (çok vaktimi aldı burası çok zordu burayı kodlaması)
+# bilinçsiz değiştirme güvenlik açığı oluşturabilirsin
+# ----------------------------
+class UpdatePromptDialog(QDialog):
+    update_accepted = Signal()
+
+    def __init__(self, latest_version: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(_("New Update Available"))
+        self.setFixedSize(400, 150)
+        
+        main_layout = QVBoxLayout(self)
+        main_layout.addWidget(QLabel(_("A new version of EasyHash is available: v") + latest_version))
+        main_layout.addWidget(QLabel(_("Do you want to download and install now?")))
+        
+        button_layout = QHBoxLayout()
+        yes_button = QPushButton(_("Yes, Update"))
+        no_button = QPushButton(_("No, Not Now"))
+        
+        yes_button.clicked.connect(self.accept_update)
+        no_button.clicked.connect(self.reject)
+        
+        button_layout.addStretch(1)
+        button_layout.addWidget(yes_button)
+        button_layout.addWidget(no_button)
+        main_layout.addLayout(button_layout)
+
+    def accept_update(self):
+        self.update_accepted.emit()
+        self.accept()
+
+class UpdateProgressDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(_("Downloading Update"))
+        self.setFixedSize(450, 200)
+
+        main_layout = QVBoxLayout(self)
+        
+        self.progress_label = QLabel(_("Starting..."))
+        self.progress_label.setAlignment(Qt.AlignCenter)
+        main_layout.addWidget(self.progress_label)
+
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setTextVisible(False)
+        main_layout.addWidget(self.progress_bar)
+        
+        self.percentage_label = QLabel("0%")
+        self.percentage_label.setAlignment(Qt.AlignCenter)
+        main_layout.addWidget(self.percentage_label)
+        
+        # Kullanıcının pencereyi kapatmasını engelle
+        self.setWindowFlags(self.windowFlags() | Qt.CustomizeWindowHint)
+        self.setWindowFlag(Qt.WindowCloseButtonHint, False)
+        self.setWindowFlag(Qt.WindowContextHelpButtonHint, False)
+        self.setModal(True)
+
+# ----------------------------
+# güncelleme thread'leri
+# ----------------------------
+class UpdateChecker(QThread):
+    update_available = Signal(str, str) # latest_version, download_url
+    check_finished = Signal(bool) # güncelleme bulunup bulunmadığı bilgisini alıp götüne sokuyor (şaka)
+
+    def __init__(self, current_version: str, api_url: str, parent=None):
+        super().__init__(parent)
+        self.current_version = current_version
+        self.api_url = api_url
+
+    def run(self):
+        try:
+            response = requests.get(self.api_url, timeout=5)
+            response.raise_for_status()
+            
+            data = response.json()
+            latest_version_tag = data.get("tag_name", "v0.0.0").lstrip('v')
+            
+            # sürüm karşılaştırması (basit major.minor.patch)
+            current_parts = [int(p) for p in self.current_version.split('.')]
+            latest_parts = [int(p) for p in latest_version_tag.split('.')]
+            
+            if latest_parts > current_parts:
+                download_url = data.get("assets", [{}])[0].get("browser_download_url")
+                if download_url:
+                    self.update_available.emit(latest_version_tag, download_url)
+                    self.check_finished.emit(True)
+                else:
+                    if LOG_ENABLED: logging.warning("Güncelleme bulundu ama indirme linki yok.")
+                    self.check_finished.emit(False)
+            else:
+                self.check_finished.emit(False)
+                
+        except requests.exceptions.RequestException as e:
+            if LOG_ENABLED: logging.error(f"Güncelleme kontrol hatası: {e}")
+            self.check_finished.emit(False)
+        except Exception as e:
+            if LOG_ENABLED: logging.exception(f"Beklenmedik güncelleme kontrol hatası: {e}")
+            self.check_finished.emit(False)
+
+class Updater(QThread):
+    update_progress = Signal(int, str) # progress_percentage, status_message
+    update_error = Signal(str)
+    update_complete = Signal(str) # new_version
+
+    # <<< DEĞİŞİKLİK BURADA: __init__ metoduna app_pid eklendi >>>
+    # sakın değiştirme kaynak kodunu okuyan büyük adam
+    def __init__(self, download_url: str, new_version: str, app_pid: int, parent=None):
+        super().__init__(parent)
+        self.download_url = download_url
+        self.new_version = new_version
+        self.app_pid = app_pid # pid id'sini saklıyor çünkü güncelleme bittiğinde kapaması gerek ağaçtan toplamıyor pid id'yi bu lazım
+        self.install_dir = Path(sys.executable).parent # .exe'nin olduğu dizine bakıyor ve şaşırıyor (şaka)
+        self.temp_file_path = self.install_dir / f"EasyHash_v{self.new_version}_setup.exe"
+        self.install_script_path = self.install_dir / "update_install.bat"
+
+    def run(self):
+        try:
+            self.update_progress.emit(0, _("Downloading..."))
+            
+            with requests.get(self.download_url, stream=True) as r:
+                r.raise_for_status()
+                total_size = int(r.headers.get('content-length', 0))
+                downloaded_size = 0
+                
+                with open(self.temp_file_path, 'wb') as f:
+                    for chunk in r.iter_content(chunk_size=8192):
+                        if self.isInterruptionRequested():
+                            raise Exception("İndirme işlemi kullanıcı tarafından iptal edildi.")
+                        
+                        f.write(chunk)
+                        downloaded_size += len(chunk)
+                        if total_size > 0:
+                            progress = int((downloaded_size / total_size) * 100)
+                            self.update_progress.emit(progress, _("Downloading..."))
+
+            self.update_progress.emit(100, _("Download complete. Installation starting..."))
+            
+            # kurulum betiğini oluşturuyor bu adam çok büyük bir adam o yüzden elleme burayada
+            self.create_install_script()
+            
+            # uygulamayı kapatıp kurulum betiğini çalıştırıyor
+            self.update_progress.emit(100, _("Application restarting..."))
+            self.update_complete.emit(self.new_version)
+            
+            # sisteme özgün kurulum başlatıyor
+            if os.name == 'nt':
+                # kurulum betiğini çalıştırmak için yeni bir process başlat
+                os.startfile(str(self.install_script_path))
+                QApplication.quit() # ana uygulamayı kapat
+            
+        except Exception as e:
+            if LOG_ENABLED: logging.exception(f"Updater hatası: {e}")
+            self.update_error.emit(f"{_('Update operation failed: ')}{e}")
+            
+        finally:
+            if self.temp_file_path.exists():
+                # iptal veya hatada temp dosyasını temizle
+                pass 
+
+    def create_install_script(self):
+        """Kurulum dosyasını başlatan ve temp dosyalarını temizleyen GÜVENLİ betik (Windows)."""
+        # <<< taskkill ve START /WAIT komutları ekleniyor >>>
+        # bilinçsiz değiştirme nolujr
+        
+        app_exe = Path(sys.executable).name
+        installer_path = str(self.temp_file_path).replace('"', '')
+        script_path = str(self.install_script_path).replace('"', '')
+        app_exe_path = str(self.install_dir / app_exe).replace('"', '')
+
+        script_content = f"""@echo off
+set "OLD_PID={self.app_pid}"
+set "INSTALLER_PATH={installer_path}"
+set "SCRIPT_PATH={script_path}"
+set "APP_EXE={app_exe_path}"
+
+echo Uygulamayi sonlandiriliyor... PID: %OLD_PID%
+taskkill /PID %OLD_PID% /F 2>nul
+if errorlevel 1 (
+    echo PID bulunamadi veya sonlandirildi.
+)
+
+echo Kurulum baslatiliyor...
+start /wait "" "%INSTALLER_PATH%"
+
+echo Temizlik ve yeniden baslatma...
+del "%INSTALLER_PATH%" 2>nul
+del "%SCRIPT_PATH%" 2>nul
+start "" "%APP_EXE%"
+exit
+"""
+
+        try:
+            with open(self.install_script_path, "w", encoding="utf-8") as f:
+                f.write(script_content)
+        except Exception as e:
+             if LOG_ENABLED: logging.error(f"Kurulum betiği oluşturulamadı: {e}")
+
+# ----------------------------
+# ANA UYGULAMA (ASIL ŞEYLER BURADA)
+# ----------------------------
+class HashingApp(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        
+        self.current_file: Optional[Path] = None
+        
+        # ayarları yüklemeden önce varsayılan dil ataması
+        self.current_language = "English" 
+        
+        self.settings_path = CONFIG_DIR / "settings.json"
+        self.load_settings()
+        
+        # ayarlar yüklendikten sonra çeviri fonksiyonunu ayarla
+        set_language(self.current_language)
+
+        self.setWindowTitle(self.tr("EasyHash"))
+        self.setFixedSize(650, 600)
+        self.setAcceptDrops(True)
+
+        self.chunk_size = 1024 * 1024
+        self.is_compare_mode = False
+        self.enable_unsafe_hashes = False
+        self.ignore_policies = False
+        self.shake_length = DEFAULT_SHAKE_LEN
+        self.enable_logging = True
+        self._manual_update_check_started = False 
+
+        self.worker_thread: Optional[Worker] = None
+        self.compare_worker: Optional[Worker] = None
+
+        self.center_window()
+        
+        setup_logging(self.enable_logging)
+        self.setup_ui()
+        self.connect_signals()
+        self.apply_main_theme(self.current_theme)
+        
+        self.check_for_updates()
+
+    # yeni eklenen çeviri metodu (UnboundLocalError'ı çözer)
+    def tr(self, text: str) -> str:
+        """Kapsam sorunlarını önlemek için global çeviri fonksiyonunu çağırır."""
+        return _(text)
+        
+    def center_window(self):
+        try:
+            screen = QApplication.primaryScreen()
+            center_point = screen.availableGeometry().center()
+            old_geometry = self.geometry()
+            new_geometry = QRect(old_geometry)
+            new_geometry.moveCenter(center_point)
+            self.setGeometry(new_geometry)
+        except Exception:
+            pass
+
+    def setup_ui(self):
+        self.central_widget = QWidget()
+        self.setCentralWidget(self.central_widget)
+        self.main_layout = QVBoxLayout(self.central_widget)
+        self.main_layout.setContentsMargins(40, 40, 40, 40)
+        self.main_layout.setSpacing(25)
+
+        self.menu_bar = self.menuBar()
+        self.options_menu = self.menu_bar.addMenu(self.tr("Options"))
+        self.help_menu = self.menu_bar.addMenu(self.tr("Help"))
+
+        self.settings_action = QAction(self.tr("Settings"), self)
+        self.check_update_action = QAction(self.tr("Check for Updates"), self)
+        self.about_action = QAction(self.tr("About EasyHash"), self)
+        self.version_action = QAction(self.tr("EasyHash Version"), self)
+        
+        self.options_menu.addAction(self.settings_action)
+        self.help_menu.addAction(self.check_update_action)
+        self.help_menu.addAction(self.about_action)
+        self.help_menu.addAction(self.version_action)
+
+        self.normal_mode_widget = QWidget()
+        self.normal_layout = QVBoxLayout(self.normal_mode_widget)
+        self.normal_layout.setContentsMargins(0, 0, 0, 0)
+        self.normal_layout.setSpacing(15)
+
+        # dosya seçim grubu
+        self.file_group = QGroupBox(self.tr("File Selection"))
+        file_layout = QVBoxLayout(self.file_group)
+        file_layout.setSpacing(10)
+        self.select_file_btn = QPushButton(self.tr("Select File"))
+        self.file_label = QLabel(self.tr("No file selected yet"))
+        
+        # bu label'a basit bir stil verelim ki tema değişiminde görünür olsun
+        if self.current_theme == "Koyu":
+            label_style = "QLabel { background-color: #2e2e2e; border: 1px solid #4e4e4e; border-radius: 8px; padding: 10px; }"
+        else:
+            label_style = "QLabel { background-color: #ffffff; border: 1px solid #c9c9c9; border-radius: 8px; padding: 10px; }"
+        self.file_label.setStyleSheet(label_style)
+        
+        file_layout.addWidget(self.file_label)
+        file_layout.addWidget(self.select_file_btn)
+        self.normal_layout.addWidget(self.file_group)
+
+        # hash hesaplama grubu
+        self.hash_group = QGroupBox(self.tr("Select Hash Algorithm and Calculate"))
+        hash_layout = QVBoxLayout(self.hash_group)
+        hash_layout.setSpacing(10)
+        self.hash_combo = QComboBox()
+        self.update_hash_combobox()
+        self.status_label = QLabel(self.tr("Ready"))
+        self.status_label.setAlignment(Qt.AlignCenter)
+        hash_layout.addWidget(self.hash_combo)
+        hash_layout.addWidget(self.status_label)
+        
+        progress_frame = QWidget()
+        progress_layout = QHBoxLayout(progress_frame)
+        progress_layout.setContentsMargins(0, 0, 0, 0)
+        progress_layout.setSpacing(10)
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setTextVisible(False)
+        self.progress_label = QLabel("0%")
+        progress_layout.addWidget(self.progress_bar, stretch=1)
+        progress_layout.addWidget(self.progress_label)
+        hash_layout.addWidget(progress_frame)
+
+        btn_frame = QWidget()
+        btn_layout = QHBoxLayout(btn_frame)
+        btn_layout.setContentsMargins(0, 0, 0, 0)
+        btn_layout.setSpacing(10)
+        self.calculate_btn = QPushButton(self.tr("Hash Calculate"))
+        self.cancel_btn = QPushButton(self.tr("Cancel"))
+        self.cancel_btn.setEnabled(False)
+        btn_layout.addWidget(self.calculate_btn)
+        btn_layout.addWidget(self.cancel_btn)
+        hash_layout.addWidget(btn_frame)
+        self.normal_layout.addWidget(self.hash_group)
+
+        # sonuç grubu
+        self.result_group = QGroupBox(self.tr("Result"))
+        result_layout = QVBoxLayout(self.result_group)
+        self.result_text = QTextEdit()
+        self.result_text.setReadOnly(True)
+        self.result_text.setPlaceholderText(self.tr("Calculation result will appear here..."))
+        result_layout.addWidget(self.result_text)
+        self.normal_layout.addWidget(self.result_group)
+        self.normal_layout.addStretch(1)
+
+        # karşılaştırma modu kurulumu
+        self.compare_mode_widget = QWidget()
+        self.compare_layout = QVBoxLayout(self.compare_mode_widget)
+        self.compare_layout.setContentsMargins(0, 0, 0, 0)
+        self.compare_layout.setSpacing(15)
+
+        self.compare_group = QGroupBox(self.tr("Hash Comparison Mode"))
+        self.compare_group.setToolTip(self.tr("Hash comparison mode."))
+        compare_layout_inner = QVBoxLayout(self.compare_group) 
+        compare_layout_inner.setSpacing(15)
+
+        top_frame = QWidget()
+        top_layout = QVBoxLayout(top_frame)
+        top_layout.setSpacing(10)
+        self.compare_select_btn = QPushButton(self.tr("Compare File to Select"))
+        self.compare_file_label = QLabel(self.tr("No file selected yet"))
+        
+        self.compare_file_label.setStyleSheet(label_style) # tema stilini uyguluyor
+        
+        self.compare_combo = QComboBox()
+        self.update_compare_combobox()
+        top_layout.addWidget(self.compare_file_label)
+        top_layout.addWidget(self.compare_select_btn)
+        top_layout.addWidget(self.compare_combo)
+        compare_layout_inner.addWidget(top_frame)
+
+        hashes_frame = QWidget()
+        hashes_layout = QGridLayout(hashes_frame)
+        hashes_layout.setSpacing(10)
+        hashes_layout.addWidget(QLabel(self.tr("Manual Hash:")), 0, 0)
+        self.manual_hash_text = QLineEdit()
+        self.manual_hash_text.setPlaceholderText(self.tr("Paste here..."))
+        hashes_layout.addWidget(self.manual_hash_text, 0, 1)
+
+        hashes_layout.addWidget(QLabel(self.tr("Calculated Hash:")), 1, 0)
+        self.calculated_hash_text = QLineEdit()
+        self.calculated_hash_text.setReadOnly(True)
+        self.calculated_hash_text.setPlaceholderText(self.tr("The calculated hash will appear here."))
+        hashes_layout.addWidget(self.calculated_hash_text, 1, 1)
+        compare_layout_inner.addWidget(hashes_frame)
+
+        self.compare_status_label = QLabel(self.tr("Enter two hash values."))
+        self.compare_status_label.setAlignment(Qt.AlignCenter)
+        self.compare_status_label.setStyleSheet("font-weight: bold; font-size: 16px;")
+        compare_layout_inner.addWidget(self.compare_status_label)
+
+        self.compare_progress_bar = QProgressBar()
+        self.compare_progress_bar.setTextVisible(False)
+        compare_layout_inner.addWidget(self.compare_progress_bar)
+
+        self.compare_cancel_btn = QPushButton(self.tr("Cancel"))
+        self.compare_cancel_btn.setEnabled(False)
+        compare_layout_inner.addWidget(self.compare_cancel_btn)
+        
+        self.compare_layout.addWidget(self.compare_group)
+        self.compare_layout.addStretch(1)
+
+        self.main_layout.addWidget(self.normal_mode_widget)
+        self.main_layout.addWidget(self.compare_mode_widget)
+        self.compare_mode_widget.hide()
+        
+        self.update_ui_texts() # başlangıç diline göre metinleri ayarlıyor
+
+    def connect_signals(self):
+        # NORMAL MOD DOSYA SEÇİMİ
+        self.select_file_btn.clicked.connect(self.select_file)
+        
+        self.calculate_btn.clicked.connect(self.start_hash)
+        self.cancel_btn.clicked.connect(self.cancel_hash)
+        
+        # KARŞILAŞTIRMA MODU DOSYA SEÇİMİ
+        self.compare_select_btn.clicked.connect(self.select_file_compare)
+        
+        self.compare_cancel_btn.clicked.connect(self.cancel_compare)
+        self.manual_hash_text.textChanged.connect(self.check_hashes)
+        self.settings_action.triggered.connect(self.open_settings)
+        self.about_action.triggered.connect(self.show_about_dialog)
+        self.version_action.triggered.connect(self.show_version_dialog)
+        self.check_update_action.triggered.connect(lambda: self.check_for_updates(manual=True)) 
+
+    def update_ui_texts(self):
+        """Dil değiştiğinde tüm arayüz metinlerini günceller."""
+        self.setWindowTitle(self.tr("EasyHash"))
+        self.options_menu.setTitle(self.tr("Options"))
+        self.help_menu.setTitle(self.tr("Help"))
+        self.settings_action.setText(self.tr("Settings"))
+        self.check_update_action.setText(self.tr("Check for Updates"))
+        self.about_action.setText(self.tr("About EasyHash"))
+        self.version_action.setText(self.tr("EasyHash Version"))
+        
+        self.file_group.setTitle(self.tr("File Selection"))
+        self.select_file_btn.setText(self.tr("Select File"))
+        self.hash_group.setTitle(self.tr("Select Hash Algorithm and Calculate"))
+        self.status_label.setText(self.tr("Ready"))
+        self.calculate_btn.setText(self.tr("Hash Calculate"))
+        self.cancel_btn.setText(self.tr("Cancel"))
+        self.result_group.setTitle(self.tr("Result"))
+        self.result_text.setPlaceholderText(self.tr("Calculation result will appear here..."))
+        
+        # karşılaştırma modu
+        self.compare_group.setTitle(self.tr("Hash Comparison Mode"))
+        self.compare_group.setToolTip(self.tr("Enable this mode to compare the calculated hash value with a manually entered hash."))
+        self.compare_select_btn.setText(self.tr("Compare File to Select"))
+        self.manual_hash_text.setPlaceholderText(self.tr("Paste here..."))
+        self.calculated_hash_text.setPlaceholderText(self.tr("The calculated hash will appear here."))
+        self.compare_status_label.setText(self.tr("Enter two hash values."))
+        self.compare_cancel_btn.setText(self.tr("Cancel"))
+        
+        # eğer bir dosya seçiliyse metni güncelle
+        if not self.current_file:
+            self.file_label.setText(self.tr("No file selected yet"))
+            self.compare_file_label.setText(self.tr("No file selected yet"))
+        # veya mevcut dosya adını koru
+
+    def show_about_dialog(self):
+        about_text = (
+            self.tr("----------- General Information -----------") + "\n\n"
+            + self.tr("EasyHash is a completely open source Hash measurement application.") + "\n\n"
+            + self.tr("EasyHash source code is available on our official GitHub page.") + "\n\n"
+            + self.tr("We do not have any donations or PayPal page.") + "\n\n"
+            + self.tr("----------- Security -----------") + "\n\n"
+            + self.tr("EasyHash DOES NOT collect any information or data, but an \"app.log\" file is located in the user's local AppData folder, which is used to record application crashes and other simple things and is NOT SHARED or COLLECTED with anyone. If you do not want the \"app.log\" file to collect crash data, you can turn it off in the application settings.")
+        )
+        QMessageBox.information(self, self.tr("About EasyHash"), about_text)
+
+    def show_version_dialog(self):
+        QMessageBox.information(self, self.tr("EasyHash Version"), self.tr("Application Version: ") + APP_VERSION)
+
+    def dragEnterEvent(self, event):
+        """Sürüklenen verinin bir dosya olup olmadığını kontrol eder."""
+        if event.mimeData().hasUrls():
+            if all(url.isLocalFile() for url in event.mimeData().urls()):
+                event.acceptProposedAction()
+                return
+        event.ignore()
+
+    def dropEvent(self, event):
+        """Bırakılan dosyayı işler."""
+        if event.mimeData().hasUrls():
+            urls = event.mimeData().urls()
+            if not urls:
+                event.ignore()
+                return
+
+            # sadece tek bir dosyanın bırakılmasını destekliyoruz
+            if len(urls) > 1:
+                QMessageBox.warning(self, self.tr("Error"), self.tr("Please drag only one file."))
+                event.ignore()
+                return
+
+            file_path = Path(urls[0].toLocalFile())
+            
+            # sadece dosya işliyoruz, klasörleri reddet
+            if not file_path.is_file():
+                 QMessageBox.warning(self, self.tr("Error"), self.tr("Please drag a file, not a folder."))
+                 event.ignore()
+                 return
+
+            self.current_file = file_path
+            self.file_label.setText(self.current_file.name)
+            self.result_text.clear()
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def update_hash_combobox(self):
+        self.hash_combo.clear()
+        algorithms = list(ALLOWED_HASHES.keys()) + list(XOF_HASHES.keys())
+        if self.enable_unsafe_hashes:
+            algorithms.extend(list(UNSAFE_HASHES.keys()))
+        self.hash_combo.addItems(algorithms)
+        if "sha256" in algorithms:
+            self.hash_combo.setCurrentText("sha256")
+        elif "md5" in algorithms:
+            self.hash_combo.setCurrentText("md5")
+
+    def update_compare_combobox(self):
+        self.compare_combo.clear()
+        algorithms = list(ALLOWED_HASHES.keys()) + list(XOF_HASHES.keys())
+        if self.enable_unsafe_hashes:
+            algorithms.extend(list(UNSAFE_HASHES.keys()))
+        self.compare_combo.addItems(algorithms)
+        if "sha256" in algorithms:
+            self.compare_combo.setCurrentText("sha256")
+        elif "md5" in algorithms:
+            self.compare_combo.setCurrentText("md5")
+
+    def is_removable_drive(self, path: Path) -> bool:
+        if self.ignore_policies:
+            return False
+        if os.name != 'nt':
+            return False
+        try:
+            import ctypes
+            import ctypes.wintypes
+            drive_letter = path.drive
+            if not drive_letter:
+                return False
+            root = (drive_letter + "\\").replace("/", "\\")
+            drive_type = ctypes.windll.kernel32.GetDriveTypeW(ctypes.wintypes.LPCWSTR(root))
+            return int(drive_type) == 2
+        except (OSError, ImportError) as e:
+            if LOG_ENABLED: logging.exception(f"{self.tr('An error occurred while checking the external drive.')}: {e}")
+            return False
+
+
+    def toggle_compare_mode(self, checked: bool):
+        self.is_compare_mode = checked
+        if checked:
+            self.normal_mode_widget.hide()
+            self.compare_mode_widget.show()
+            self.setWindowTitle(self.tr("EasyHash") + " - " + self.tr("Hash Comparison Mode"))
+        else:
+            self.normal_mode_widget.show()
+            self.compare_mode_widget.hide()
+            self.setWindowTitle(self.tr("EasyHash"))
+            self.manual_hash_text.clear()
+            self.calculated_hash_text.clear()
+            self.compare_file_label.setText(self.tr("No file selected yet"))
+            self.compare_status_label.clear()
+            self.compare_progress_bar.setValue(0)
+            
+    def on_worker_finished_normal(self):
+        if self.worker_thread:
+            self.worker_thread.deleteLater()
+        self.worker_thread = None
+
+    def on_worker_finished_compare(self):
+        if self.compare_worker:
+            self.compare_worker.deleteLater()
+        self.compare_worker = None
+
+    def select_file_compare(self):
+        # QFileDialog.getOpenFileName çağrısı, dosya seçme penceresini açar
+        file_path, _ = QFileDialog.getOpenFileName(self, self.tr("Select File"))
+        if file_path:
+            file_path = Path(file_path)
+            if not self.ignore_policies:
+                if self.is_removable_drive(file_path):
+                    reply = QMessageBox.warning(self, self.tr("Warning! External Drive Detected"),
+                        self.tr("This file is on an external storage device. Ejecting the drive during the process may cause data corruption. Do you approve?"),
+                        QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+                    if reply == QMessageBox.No:
+                        return
+
+                if not is_allowed_file(file_path, self.ignore_policies):
+                    QMessageBox.warning(self, self.tr("Error"), self.tr("The selected file has unsuitable permissions or location."))
+                    return
+
+            self.current_file = file_path
+            self.compare_file_label.setText(self.current_file.name)
+            self.calculate_and_check_hash()
+
+    def calculate_and_check_hash(self):
+        if not self.current_file or not self.current_file.is_file():
+            return
+
+        self.compare_status_label.setText(self.tr("Hash value is being calculated..."))
+        self.compare_cancel_btn.setEnabled(True)
+
+        if self.compare_worker and self.compare_worker.isRunning():
+            self.compare_worker.requestInterruption()
+        
+        try:
+            self.compare_worker = Worker(
+                self.current_file,
+                self.compare_combo.currentText(),
+                self.chunk_size,
+                self.shake_length,
+                parent=self
+            )
+        except ValueError as e:
+            QMessageBox.warning(self, self.tr("Error"), str(e))
+            self.compare_cancel_btn.setEnabled(False)
+            self.compare_status_label.setText(self.tr("Error"))
+            return
+
+        self.compare_worker.progress_updated.connect(self.compare_progress_bar.setValue)
+        self.compare_worker.calculation_finished.connect(self.show_compare_result)
+        self.compare_worker.error_occurred.connect(self.handle_error_compare_mode)
+        self.compare_worker.finished.connect(self.on_worker_finished_compare)
+        self.compare_worker.start()
+
+    def show_compare_result(self, hash_type: str, result: str, file_path: str):
+        self.calculated_hash_text.setText(result)
+        self.check_hashes()
+        self.compare_progress_bar.setValue(100)
+        self.compare_cancel_btn.setEnabled(False)
+
+    def handle_error_compare_mode(self, message: str):
+        self.compare_progress_bar.setValue(0)
+        self.compare_status_label.setText(self.tr("Error"))
+        self.compare_status_label.setStyleSheet("color: red; font-weight: bold; font-size: 16px;")
+        QMessageBox.warning(self, self.tr("Operation Error"), message)
+        self.compare_cancel_btn.setEnabled(False)
+
+    def check_hashes(self):
+        calculated_hash = self.calculated_hash_text.text().strip()
+        manual_hash = self.manual_hash_text.text().strip()
+
+        if calculated_hash and manual_hash:
+            try:
+                # Güvenli karşılaştırma
+                if hmac.compare_digest(calculated_hash.lower(), manual_hash.lower()):
+                    self.compare_status_label.setText(self.tr("Hash values match."))
+                    self.compare_status_label.setStyleSheet("color: green; font-weight: bold; font-size: 16px;")
+                else:
+                    self.compare_status_label.setText(self.tr("Hash values do not match."))
+                    self.compare_status_label.setStyleSheet("color: red; font-weight: bold; font-size: 16px;")
+            except Exception:
+                if LOG_ENABLED: logging.exception(self.tr("File read error."))
+                self.compare_status_label.setText(self.tr("Error while comparing."))
+        else:
+            # hashlerden biri veya ikisi boşsa durumu temizle
+            self.compare_status_label.clear()
+
+    def select_file(self):
+        # QFileDialog.getOpenFileName çağrısı dosya seçme penceresini açar
+        file_path, _ = QFileDialog.getOpenFileName(self, self.tr("Select File"))
+        if file_path:
+            file_path = Path(file_path)
+            if not self.ignore_policies:
+                if self.is_removable_drive(file_path):
+                    reply = QMessageBox.warning(self, self.tr("Warning! External Drive Detected"),
+                        self.tr("This file is on an external storage device. Ejecting the drive during the process may cause data corruption. Do you approve?"),
+                        QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+                    if reply == QMessageBox.No:
+                        return
+
+                if not is_allowed_file(file_path, self.ignore_policies):
+                    QMessageBox.warning(self, self.tr("Error"), self.tr("The selected file has unsuitable permissions or location."))
+                    return
+
+            self.current_file = file_path
+            self.file_label.setText(self.current_file.name)
+
+    def start_hash(self):
+        if not self.current_file or not self.current_file.is_file():
+            QMessageBox.warning(self, self.tr("Error"), self.tr("Please select a valid file!"))
+            return
+
+        self.result_text.clear()
+        self.progress_bar.setValue(0)
+        self.progress_label.setText("0%")
+        self.calculate_btn.setEnabled(False)
+        self.options_menu.setEnabled(False)
+        self.status_label.setText(self.tr("Hash value is being calculated..."))
+        self.cancel_btn.setEnabled(True)
+
+        if self.worker_thread and self.worker_thread.isRunning():
+            self.worker_thread.requestInterruption()
+        
+        try:
+            self.worker_thread = Worker(
+                self.current_file,
+                self.hash_combo.currentText(),
+                self.chunk_size,
+                self.shake_length,
+                parent=self
+            )
+        except ValueError as e:
+            QMessageBox.warning(self, self.tr("Error"), str(e))
+            self.calculate_btn.setEnabled(True)
+            self.options_menu.setEnabled(True)
+            self.cancel_btn.setEnabled(False)
+            return
+
+        self.worker_thread.progress_updated.connect(self.update_progress)
+        self.worker_thread.calculation_finished.connect(self.show_result)
+        self.worker_thread.error_occurred.connect(self.handle_error_normal_mode)
+        self.worker_thread.finished.connect(self.on_worker_finished_normal)
+        self.worker_thread.start()
+
+    def cancel_hash(self):
+        if self.worker_thread and self.worker_thread.isRunning():
+            self.worker_thread.requestInterruption()
+        self.calculate_btn.setEnabled(True)
+        self.options_menu.setEnabled(True)
+        self.cancel_btn.setEnabled(False)
+        self.status_label.setText(self.tr("Canceled."))
+        self.progress_bar.setValue(0)
+        self.progress_label.setText("0%")
+
+    def cancel_compare(self):
+        if self.compare_worker and self.compare_worker.isRunning():
+            self.compare_worker.requestInterruption()
+        self.compare_cancel_btn.setEnabled(False)
+        self.compare_progress_bar.setValue(0)
+        self.compare_status_label.setText(self.tr("Canceled."))
+
+    def update_progress(self, value: int):
+        self.progress_bar.setValue(value)
+        self.progress_label.setText(f"{value}%")
+
+    def show_result(self, hash_type: str, result: str, file_path: str):
+        try:
+            self.status_label.setText(self.tr("Calculation completed."))
+            file_name = Path(file_path).name
+            self.result_text.setText(f"{self.tr('File:')} {file_name}\n{hash_type.upper()}:\n{result}")
+        finally:
+            self.calculate_btn.setEnabled(True)
+            self.options_menu.setEnabled(True)
+            self.cancel_btn.setEnabled(False)
+            self.progress_bar.setValue(100)
+            self.progress_label.setText("100%")
+
+    def handle_error_normal_mode(self, message: str):
+        self.progress_bar.setValue(0)
+        self.progress_label.setText("0%")
+        self.status_label.setText(self.tr("Error"))
+        self.result_text.setText(f"{self.tr('Error')}: {message}")
+        self.calculate_btn.setEnabled(True)
+        self.options_menu.setEnabled(True)
+        self.cancel_btn.setEnabled(False)
+        QMessageBox.warning(self, self.tr("Operation Error"), message)
+
+    def apply_main_theme(self, theme_name: str):
+        self.current_theme = theme_name
+        
+        # tema adını ingilizce anahtara çevirir çok önemli
+        theme_key = "Koyu" if theme_name == "Koyu" or theme_name == self.tr("Dark") else "Açık"
+        
+        if theme_key == "Koyu":
+            QApplication.instance().setStyleSheet(MODERN_DARK_THEME_QSS)
+        else:
+            QApplication.instance().setStyleSheet(MODERN_LIGHT_THEME_QSS)
+        
+        # dosya label'larına tema stilini uygula/güncelle
+        if hasattr(self, 'file_label') and hasattr(self, 'compare_file_label'):
+            if theme_key == "Koyu":
+                label_style = "QLabel { background-color: #2e2e2e; border: 1px solid #4e4e4e; border-radius: 8px; padding: 10px; }"
+            else:
+                label_style = "QLabel { background-color: #ffffff; border: 1px solid #c9c9c9; border-radius: 8px; padding: 10px; }"
+            
+            self.file_label.setStyleSheet(label_style)
+            self.compare_file_label.setStyleSheet(label_style)
+
+    def load_settings(self):
+        data = load_settings_safe(self.settings_path)
+        self.current_theme = data.get("theme", "Koyu")
+        self.current_language = data.get("language", "English")
+        self.chunk_size = data.get("chunk_size", 1024 * 1024)
+        self.enable_unsafe_hashes = data.get("enable_unsafe_hashes", False)
+        self.ignore_policies = data.get("ignore_policies", False)
+        self.shake_length = data.get("shake_length", DEFAULT_SHAKE_LEN)
+        self.enable_logging = data.get("enable_logging", True)
+
+    def save_settings(self, settings_data: Dict[str, Any]):
+        save_settings_safe(self.settings_path, settings_data)
+
+    def open_settings(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle(self.tr("Settings"))
+        dialog.setFixedSize(500, 480)
+        dialog.setStyleSheet(QApplication.instance().styleSheet())
+        main_layout = QVBoxLayout(dialog)
+
+        # --------------------
+        # GENEL AYARLAR
+        # --------------------
+        general_group = QGroupBox(self.tr("General Settings"))
+        general_layout = QGridLayout(general_group)
+        general_layout.setSpacing(15)
+
+        # tema
+        theme_label = QLabel(self.tr("Application Appearance:"))
+        theme_label.setToolTip(self.tr("Select the dark or light theme of the application."))
+        theme_combo = QComboBox()
+        theme_combo.addItem(self.tr("Dark"), "Koyu")
+        theme_combo.addItem(self.tr("Light"), "Açık")
+        theme_combo.setCurrentText(self.tr(self.current_theme)) # mevcut temayı çevrilmiş metinle seç
+        
+        # tema seçimi değiştiğinde geçici olarak temayı uygula
+        theme_combo.currentTextChanged.connect(lambda text: self.apply_main_theme(text))
+        general_layout.addWidget(theme_label, 0, 0)
+        general_layout.addWidget(theme_combo, 0, 1)
+        
+        # DİL AYARI
+        lang_label = QLabel(self.tr("Language:"))
+        lang_combo = QComboBox()
+        # dil listesini doldur
+        lang_combo.addItems([LANGUAGES[key]["name"] for key in LANGUAGES])
+        lang_combo.setCurrentText(self.current_language)
+        general_layout.addWidget(lang_label, 1, 0)
+        general_layout.addWidget(lang_combo, 1, 1)
+
+        compare_mode_checkbox = QCheckBox(self.tr("Hash Comparison Mode"))
+        compare_mode_checkbox.setToolTip(self.tr("Enable this mode to compare the calculated hash value with a manually entered hash."))
+        compare_mode_checkbox.setChecked(self.is_compare_mode)
+        compare_mode_checkbox.stateChanged.connect(lambda s: self.toggle_compare_mode(bool(s)))
+        general_layout.addWidget(compare_mode_checkbox, 2, 0, 1, 2)
+        
+        main_layout.addWidget(general_group)
+
+        # --------------------
+        # PERFORMANS VE GÜVENLİK
+        # --------------------
+        performance_group = QGroupBox(self.tr("Performance and Security"))
+        performance_layout = QGridLayout(performance_group)
+        performance_layout.setSpacing(15)
+
+        chunk_label = QLabel(self.tr("File Read Chunk Size:"))
+        chunk_label.setToolTip(self.tr("Determines how large chunks of files will be read. Larger chunks can increase speed but also increase memory usage."))
+        chunk_slider = QSlider(Qt.Horizontal)
+        chunk_slider.setMinimum(MIN_CHUNK)
+        chunk_slider.setMaximum(MAX_CHUNK)
+        chunk_slider.setSingleStep(64 * 1024)
+        chunk_slider.setValue(self.chunk_size)
+        chunk_label_value = QLabel(f"{self.chunk_size / (1024 * 1024):.2f} MB")
+        
+        def update_chunk_size_and_label(value):
+            nonlocal temp_chunk_size
+            new_chunk_size = max(MIN_CHUNK, min(MAX_CHUNK, value))
+            if new_chunk_size >= 1024 * 1024:
+                size_mb = new_chunk_size / (1024 * 1024)
+                chunk_label_value.setText(f"{size_mb:.2f} MB")
+            else:
+                size_kb = new_chunk_size / 1024
+                chunk_label_value.setText(f"{size_kb:.0f} KB")
+            temp_chunk_size = new_chunk_size
+
+        temp_chunk_size = self.chunk_size
+        chunk_slider.valueChanged.connect(update_chunk_size_and_label)
+
+        performance_layout.addWidget(chunk_label, 0, 0)
+        performance_layout.addWidget(chunk_slider, 0, 1)
+        performance_layout.addWidget(chunk_label_value, 0, 2)
+        
+        shake_label = QLabel(self.tr("SHAKE Output Length (Bytes):"))
+        shake_label.setToolTip(self.tr("Determines the output size of SHAKE algorithms. It is recommended to use at least 32 for 128-bit security and 64 for 256-bit."))
+        shake_input = QLineEdit()
+        shake_input.setPlaceholderText(str(DEFAULT_SHAKE_LEN))
+        shake_input.setText(str(self.shake_length))
+        shake_input.setFixedWidth(50)
+        performance_layout.addWidget(shake_label, 1, 0)
+        performance_layout.addWidget(shake_input, 1, 1)
+        
+        enable_unsafe_hashes_checkbox = QCheckBox(self.tr("Enable Unsafe Algorithms (MD5, SHA1)"))
+        enable_unsafe_hashes_checkbox.setToolTip(self.tr("These algorithms are considered weak and should not be used in security applications. Use them only to verify legacy hashes."))
+        enable_unsafe_hashes_checkbox.setChecked(self.enable_unsafe_hashes)
+        performance_layout.addWidget(enable_unsafe_hashes_checkbox, 2, 0, 1, 3)
+
+        ignore_policies_checkbox = QCheckBox(self.tr("Ignore Application Policies"))
+        ignore_policies_checkbox.setToolTip(self.tr("Disables security policies such as access to files on external drives and file size limits."))
+        ignore_policies_checkbox.setChecked(self.ignore_policies)
+        performance_layout.addWidget(ignore_policies_checkbox, 3, 0, 1, 3)
+
+        enable_logging_checkbox = QCheckBox(self.tr("Disable Error Logging (app.log)"))
+        enable_logging_checkbox.setToolTip(self.tr("Stops logging application crashes and error messages to the app.log file."))
+        enable_logging_checkbox.setChecked(not self.enable_logging)
+        performance_layout.addWidget(enable_logging_checkbox, 4, 0, 1, 3)
+        
+        main_layout.addWidget(performance_group)
+        
+        main_layout.addStretch(1)
+
+        ok_button = QPushButton(self.tr("Save and Close"))
+        ok_button.clicked.connect(dialog.accept)
+        main_layout.addWidget(ok_button)
+
+        update_chunk_size_and_label(self.chunk_size)
+
+        if dialog.exec() == QDialog.Accepted:
+            new_theme_text = theme_combo.currentText()
+            new_lang_key = lang_combo.currentText()
+            
+            # Tema adını İngilizce anahtara çevir
+            new_theme_key = "Koyu" if new_theme_text == self.tr("Dark") else "Açık"
+            
+            language_changed = (self.current_language != new_lang_key)
+            
+            self.current_theme = new_theme_key # Türkçe/İngilizce anahtarı (Koyu/Açık)
+            self.current_language = new_lang_key
+            self.is_compare_mode = compare_mode_checkbox.isChecked()
+            self.enable_unsafe_hashes = enable_unsafe_hashes_checkbox.isChecked()
+            self.ignore_policies = ignore_policies_checkbox.isChecked()
+            self.chunk_size = temp_chunk_size
+            self.enable_logging = not enable_logging_checkbox.isChecked()
+            
+            try:
+                self.shake_length = int(shake_input.text())
+            except (ValueError, TypeError):
+                QMessageBox.warning(self, self.tr("Error"), self.tr("Invalid SHAKE length. Default value will be used."))
+                self.shake_length = DEFAULT_SHAKE_LEN
+
+            settings_data = {
+                "theme": self.current_theme,
+                "language": self.current_language,
+                "chunk_size": self.chunk_size,
+                "enable_unsafe_hashes": self.enable_unsafe_hashes,
+                "ignore_policies": self.ignore_policies,
+                "shake_length": self.shake_length,
+                "enable_logging": self.enable_logging
+            }
+            self.save_settings(settings_data)
+            
+            # Dil değiştiyse çeviri fonksiyonunu yeniden ayarla ve arayüzü güncelle
+            if language_changed:
+                set_language(self.current_language)
+                self.update_ui_texts()
+            # Temayı kaydettikten sonra uygula
+            self.apply_main_theme(self.current_theme)
+
+            self.update_hash_combobox()
+            self.update_compare_combobox()
+            
+            setup_logging(self.enable_logging)
+            
+            # Tema rengi değiştiyse başlık rengi için tekrar ayarla
+            self.update_ui_texts()
+
+    def check_for_updates(self, manual: bool = False):
+        """uygulama başlangıcında veya manuel tetiklenerek güncelleme kontrolü yapıyo"""
+        if not manual:
+            # Sadece otomatik kontrol (başlangıçta)
+            self.update_checker = UpdateChecker(APP_VERSION, GITHUB_REPO_API, parent=self)
+            self.update_checker.update_available.connect(self.show_update_prompt)
+            self.update_checker.start()
+        else:
+            # Manuel kontrol (Menüden)
+            QApplication.setOverrideCursor(Qt.WaitCursor)
+            self.options_menu.setEnabled(False)
+            self.help_menu.setEnabled(False)
+            self._manual_update_check_started = True
+            
+            self.manual_update_checker = UpdateChecker(APP_VERSION, GITHUB_REPO_API, parent=self)
+            self.manual_update_checker.update_available.connect(self.show_update_prompt)
+            self.manual_update_checker.check_finished.connect(
+                lambda available: self.handle_update_check_finished(available, manual=True)
+            )
+            self.manual_update_checker.start()
+            
+    def handle_update_check_finished(self, update_available: bool, manual: bool):
+        """manuel kontrol bittiğinde (güncelleme yoksa) kullanıcıya bilgi verir ve arayüz kilidini açar eğer güncelleme varsa güncelleme popupunu atıyo"""
+        if manual:
+            QApplication.restoreOverrideCursor()
+            self.options_menu.setEnabled(True)
+            self.help_menu.setEnabled(True)
+            self._manual_update_check_started = False
+            
+            if not update_available:
+                QMessageBox.information(self, self.tr("Update Check"), self.tr("No new version is available for EasyHash."))
+            
+    def handle_update_complete(self, new_version: str):
+        """Güncelleme başarılı olduğunda çağrılır ve progress dialogu kapatır."""
+        if hasattr(self, 'update_progress_dialog') and self.update_progress_dialog.isVisible():
+            self.update_progress_dialog.accept() # Kapat
+            
+        QMessageBox.information(self, self.tr("Update Successful"), 
+            f"EasyHash v{new_version}{self.tr(' installation started. The application will restart automatically.')}")
+        
+    def show_update_prompt(self, latest_version: str, download_url: str):
+        """Yeni sürüm bulunduğunda kullanıcıya soruyu gösterir."""
+        
+        if hasattr(self, '_manual_update_check_started') and self._manual_update_check_started:
+             QApplication.restoreOverrideCursor()
+             self.options_menu.setEnabled(True)
+             self.help_menu.setEnabled(True)
+             self._manual_update_check_started = False
+             
+        if hasattr(self, 'update_prompt') and self.update_prompt.isVisible():
+            return
+
+        self.update_prompt = UpdatePromptDialog(latest_version, parent=self)
+        
+        self.update_prompt.update_accepted.connect(
+            lambda: self.start_update(latest_version, download_url)
+        )
+        self.update_prompt.exec()
+
+
+    def start_update(self, latest_version: str, download_url: str):
+        """Güncellemeyi indiren ve kuran thread'i başlatır."""
+        
+        self.update_progress_dialog = UpdateProgressDialog(parent=self)
+        self.update_progress_dialog.show()
+        
+        # <<< PID'yi (Process ID) alıyorum ki sorunsuz çalışabilsin yoksa hayatta çalışmaz uygulama sende hayatta değiştirme buraları sıkıntı yaşar uygulama bide sana çok sinirlenirim o yüzden sakın yapma öyle bişey >>>
+        current_pid = os.getpid() 
+        self.updater = Updater(download_url, latest_version, current_pid, parent=self)
+        
+        self.updater.update_progress.connect(
+             lambda p, msg: (self.update_progress_dialog.progress_bar.setValue(p),
+                             self.update_progress_dialog.progress_label.setText(msg),
+                             self.update_progress_dialog.percentage_label.setText(f"{p}%"))
+        )
+        self.updater.update_error.connect(self.handle_update_error)
+        self.updater.update_complete.connect(self.handle_update_complete)
+        
+        self.updater.start()
+
+
+    def handle_update_error(self, message: str):
+        """updater thread'inden gelen hataları gösterir ve progress dialogu kapatır oha inanmiyırum"""
+        QMessageBox.critical(self, self.tr("Update Error"), message)
+        
+        if hasattr(self, 'update_progress_dialog') and self.update_progress_dialog.isVisible():
+            self.update_progress_dialog.reject()
+            
+        # Manuel kontrol arayüz kilidini kaldır
+        if hasattr(self, '_manual_update_check_started') and self._manual_update_check_started:
+             QApplication.restoreOverrideCursor()
+             self.options_menu.setEnabled(True)
+             self.help_menu.setEnabled(True)
+             self._manual_update_check_started = False
+
+# ----------------------------
+# main (sonunda)
+# ----------------------------
+def start_app():
+    from PySide6.QtWidgets import QApplication
+    import sys
+    
+    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling)
+    QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
+    
+    app = QApplication(sys.argv)
+    window = HashingApp()
+    window.show()
+    sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    start_app()
